@@ -1,14 +1,26 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Tranduy1dol/ai-lead-automation/internal/lead"
 )
+
+type unusedCreator struct{}
+
+func (unusedCreator) Create(context.Context, lead.CreateParams) (lead.Lead, error) {
+	panic("unexpected call")
+}
 
 func TestHealth(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	newMux().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	handler := lead.NewHandler(unusedCreator{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	newMux(handler).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)

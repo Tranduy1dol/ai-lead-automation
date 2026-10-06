@@ -1,0 +1,8 @@
+CREATE TABLE leads (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    email VARCHAR(320) NOT NULL,
+    company VARCHAR(200) NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
