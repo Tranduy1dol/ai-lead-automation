@@ -1,0 +1,5 @@
+ALTER TABLE leads
+    ADD COLUMN category TEXT NOT NULL DEFAULT '',
+    ADD COLUMN priority TEXT NOT NULL DEFAULT '',
+    ADD COLUMN summary TEXT NOT NULL DEFAULT '',
+    ADD COLUMN recommended_action TEXT NOT NULL DEFAULT '';

@@ -46,7 +46,16 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	leadHandler := lead.NewHandler(lead.NewRepository(pool), logger)
+	classifier := lead.ClassifierFunc(func(context.Context, lead.Lead) (lead.Classification, error) {
+		return lead.Classification{
+			Category:          "unclassified",
+			Priority:          "normal",
+			Summary:           "Classification pending",
+			RecommendedAction: "Review manually",
+		}, nil
+	})
+	leadService := lead.NewService(classifier, lead.NewPostgresRepository(pool))
+	leadHandler := lead.NewHandler(leadService, logger)
 
 	server := &http.Server{
 		Addr:              ":" + port,

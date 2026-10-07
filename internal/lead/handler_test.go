@@ -27,7 +27,7 @@ func TestCreate(t *testing.T) {
 			t.Fatal("context was not propagated")
 		}
 		want := lead.CreateParams{
-			Name:    "John",
+			Name:    " John ",
 			Email:   "john@example.com",
 			Company: "Acme Inc",
 			Message: "We need to automate invoice processing.",
@@ -36,11 +36,17 @@ func TestCreate(t *testing.T) {
 			t.Fatalf("params = %#v, want %#v", params, want)
 		}
 		return lead.Lead{
-			ID:        1,
-			Name:      params.Name,
-			Email:     params.Email,
-			Company:   params.Company,
-			Message:   params.Message,
+			ID:      1,
+			Name:    "John",
+			Email:   params.Email,
+			Company: params.Company,
+			Message: params.Message,
+			Classification: lead.Classification{
+				Category:          "sales",
+				Priority:          "high",
+				Summary:           "Invoice automation inquiry",
+				RecommendedAction: "Schedule a call",
+			},
 			CreatedAt: createdAt,
 		}, nil
 	})
@@ -57,25 +63,20 @@ func TestCreate(t *testing.T) {
 	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", got)
 	}
-	want := `{"id":1,"name":"John","email":"john@example.com","company":"Acme Inc","message":"We need to automate invoice processing.","created_at":"2026-10-06T10:00:00Z"}` + "\n"
+	want := `{"id":1,"name":"John","email":"john@example.com","company":"Acme Inc","message":"We need to automate invoice processing.","classification":{"category":"sales","priority":"high","summary":"Invoice automation inquiry","recommended_action":"Schedule a call"},"created_at":"2026-10-06T10:00:00Z"}` + "\n"
 	if got := recorder.Body.String(); got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
 }
 
 func TestCreateRejectsInvalidInput(t *testing.T) {
-	called := false
 	creator := creatorFunc(func(context.Context, lead.CreateParams) (lead.Lead, error) {
-		called = true
-		return lead.Lead{}, nil
+		return lead.Lead{}, lead.ValidationError("email must be valid")
 	})
 	recorder := request(t, creator, `{"name":"John","email":"not-an-email","company":"Acme","message":"Hello"}`)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
-	}
-	if called {
-		t.Fatal("repository called for invalid input")
 	}
 	if got := recorder.Body.String(); got != "{\"error\":\"email must be valid\"}\n" {
 		t.Errorf("body = %q", got)

@@ -10,44 +10,28 @@ import (
 
 const queryTimeout = 3 * time.Second
 
-type Lead struct {
-	ID        int64
-	Name      string
-	Email     string
-	Company   string
-	Message   string
-	CreatedAt time.Time
+type Repository interface {
+	Create(context.Context, Lead) (Lead, error)
 }
 
-type CreateParams struct {
-	Name    string
-	Email   string
-	Company string
-	Message string
-}
-
-type Repository struct {
+type PostgresRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{db: db}
 }
 
-func (r *Repository) Create(ctx context.Context, params CreateParams) (Lead, error) {
+func (r *PostgresRepository) Create(ctx context.Context, lead Lead) (Lead, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
-	lead := Lead{
-		Name:    params.Name,
-		Email:   params.Email,
-		Company: params.Company,
-		Message: params.Message,
-	}
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO leads (name, email, company, message)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at`, params.Name, params.Email, params.Company, params.Message).
+		INSERT INTO leads (name, email, company, message, category, priority, summary, recommended_action)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, created_at`, lead.Name, lead.Email, lead.Company, lead.Message,
+		lead.Classification.Category, lead.Classification.Priority, lead.Classification.Summary,
+		lead.Classification.RecommendedAction).
 		Scan(&lead.ID, &lead.CreatedAt)
 	if err != nil {
 		return Lead{}, fmt.Errorf("create lead: %w", err)
