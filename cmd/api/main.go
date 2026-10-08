@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tranduy1dol/ai-lead-automation/internal/lead"
+	"github.com/Tranduy1dol/ai-lead-automation/internal/llm"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,6 +35,10 @@ func run(logger *slog.Logger) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	classifier, err := llm.NewOpenAIClassifier(os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_MODEL"), nil)
+	if err != nil {
+		return fmt.Errorf("configure classifier: %w", err)
+	}
 
 	connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -46,14 +51,6 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	classifier := lead.ClassifierFunc(func(context.Context, lead.Lead) (lead.Classification, error) {
-		return lead.Classification{
-			Category:          "unclassified",
-			Priority:          "normal",
-			Summary:           "Classification pending",
-			RecommendedAction: "Review manually",
-		}, nil
-	})
 	leadService := lead.NewService(classifier, lead.NewPostgresRepository(pool))
 	leadHandler := lead.NewHandler(leadService, logger)
 

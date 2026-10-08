@@ -6,10 +6,28 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tranduy1dol/ai-lead-automation/internal/lead"
 )
+
+func TestRunRequiresOpenAIConfigurationBeforeDatabaseConnection(t *testing.T) {
+	for _, tt := range []struct{ key, model, want string }{
+		{"", "test-model", "OPENAI_API_KEY"},
+		{"test-key", "", "OPENAI_MODEL"},
+	} {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "invalid-database-url")
+			t.Setenv("OPENAI_API_KEY", tt.key)
+			t.Setenv("OPENAI_MODEL", tt.model)
+			err := run(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want missing %s", err, tt.want)
+			}
+		})
+	}
+}
 
 type unusedCreator struct{}
 
