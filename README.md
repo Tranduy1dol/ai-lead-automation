@@ -16,8 +16,8 @@ This service automatically:
 
 ## Architecture
 
-`POST /leads` → lead handler → lead service → OpenAI classifier → PostgreSQL repository.
-The service receives its classifier and repository through constructor injection.
+`POST /leads` → lead handler → lead service → OpenAI classifier → PostgreSQL repository → Discord notifier (when configured).
+The service receives its classifier, repository, notifier, and logger through constructor injection.
 OpenAI-specific HTTP and JSON handling lives in `internal/llm`; tests retain deterministic
 `lead.ClassifierFunc` mocks and use mocked HTTP responses for the adapter.
 
@@ -34,6 +34,28 @@ or `other`), `priority` (`low`, `normal`, or `high`), and nonempty `summary` and
 `recommended_action` strings. Requests have a 30-second timeout and respect caller
 cancellation. API failures, refusals, incomplete responses, and invalid classifications
 return an error; the service does not persist the lead on classification failure.
+
+## Discord notifications
+
+Set `DISCORD_WEBHOOK_URL` to a Discord incoming webhook URL to enable notifications;
+leave it empty to preserve operation without notifications. Invalid URLs fail startup.
+Treat the URL as a secret. Each notification includes the persisted lead ID, company,
+category, priority, classification summary, and recommended action. Empty fields use
+`(not provided)`; long fields are truncated to 900 UTF-8 bytes (including an ellipsis)
+for Discord's embed limits. Full values remain in PostgreSQL. Mentions are disabled.
+
+Delivery is **best-effort in this MVP**. The service persists first, then synchronously
+attempts one notification with the caller's context and a five-second timeout. Failed
+classification or persistence never triggers a notification. Notification failures are
+logged with the lead ID and do not change the successful creation response (`201`).
+The adapter requests send confirmation (`wait=true`), rejects non-2xx responses, and
+never retries or follows redirects, including on rate limits (`429`). See the
+[Discord webhook API](https://docs.discord.com/developers/resources/webhook#execute-webhook).
+
+A crash after persistence, caller cancellation, timeout, or Discord outage can lose a
+notification; a timeout can also leave delivery uncertain. There is no durable queue,
+Kafka, Redis, or outbox. Notification errors do not cause another insert, but the lead
+API itself is not idempotent: manually repeating `POST /leads` can still create duplicates.
 
 ## Features
 

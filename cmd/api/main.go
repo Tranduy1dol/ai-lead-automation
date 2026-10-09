@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Tranduy1dol/ai-lead-automation/internal/lead"
 	"github.com/Tranduy1dol/ai-lead-automation/internal/llm"
+	"github.com/Tranduy1dol/ai-lead-automation/internal/notification"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -39,6 +41,13 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("configure classifier: %w", err)
 	}
+	var notifier lead.Notifier
+	if webhookURL := strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL")); webhookURL != "" {
+		notifier, err = notification.NewDiscordNotifier(webhookURL)
+		if err != nil {
+			return fmt.Errorf("configure notifier: %w", err)
+		}
+	}
 
 	connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -51,7 +60,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	leadService := lead.NewService(classifier, lead.NewPostgresRepository(pool))
+	leadService := lead.NewService(classifier, lead.NewPostgresRepository(pool), notifier, logger)
 	leadHandler := lead.NewHandler(leadService, logger)
 
 	server := &http.Server{

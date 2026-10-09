@@ -50,3 +50,14 @@ func TestHealth(t *testing.T) {
 		t.Errorf("body = %q, want %q", got, `{"status":"ok"}`)
 	}
 }
+
+func TestRunRejectsInvalidDiscordURLBeforeDatabaseConnection(t *testing.T) {
+	t.Setenv("DATABASE_URL", "invalid-database-url")
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "test-model")
+	t.Setenv("DISCORD_WEBHOOK_URL", "invalid-webhook-url")
+	err := run(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !strings.Contains(err.Error(), "DISCORD_WEBHOOK_URL") {
+		t.Fatalf("error = %v, want invalid Discord configuration", err)
+	}
+}

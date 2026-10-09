@@ -3,6 +3,9 @@ package lead_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +48,7 @@ func TestServiceCreateClassifiesAndPersistsLead(t *testing.T) {
 		return got, nil
 	})
 
-	created, err := lead.NewService(classifier, repository).Create(ctx, lead.CreateParams{
+	created, err := lead.NewService(classifier, repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Create(ctx, lead.CreateParams{
 		Name: " John ", Email: " john@example.com ", Company: " Acme ", Message: " Help ",
 	})
 	if err != nil {
@@ -67,7 +70,7 @@ func TestServiceCreateReturnsClassifierFailure(t *testing.T) {
 		return lead.Lead{}, nil
 	})
 
-	_, err := lead.NewService(classifier, repository).Create(context.Background(), validParams())
+	_, err := lead.NewService(classifier, repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Create(context.Background(), validParams())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 	}
@@ -85,7 +88,7 @@ func TestServiceCreateReturnsRepositoryFailure(t *testing.T) {
 		return lead.Lead{}, wantErr
 	})
 
-	_, err := lead.NewService(classifier, repository).Create(context.Background(), validParams())
+	_, err := lead.NewService(classifier, repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Create(context.Background(), validParams())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 	}
@@ -102,7 +105,7 @@ func TestServiceCreateRejectsInvalidInputBeforeDependencies(t *testing.T) {
 		return lead.Lead{}, nil
 	})
 
-	_, err := lead.NewService(classifier, repository).Create(context.Background(), lead.CreateParams{})
+	_, err := lead.NewService(classifier, repository, nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Create(context.Background(), lead.CreateParams{})
 	var validationErr lead.ValidationError
 	if !errors.As(err, &validationErr) || validationErr.Error() != "name is required" {
 		t.Fatalf("error = %v, want name validation error", err)
@@ -114,4 +117,68 @@ func TestServiceCreateRejectsInvalidInputBeforeDependencies(t *testing.T) {
 
 func validParams() lead.CreateParams {
 	return lead.CreateParams{Name: "John", Email: "john@example.com", Company: "Acme", Message: "Help"}
+}
+
+type notifierFunc func(context.Context, lead.Lead) error
+
+func (f notifierFunc) Notify(ctx context.Context, value lead.Lead) error {
+	return f(ctx, value)
+}
+
+func TestServiceNotificationAfterPersistence(t *testing.T) {
+	for _, tt := range []struct {
+		name                                               string
+		classificationErr, persistenceErr, notificationErr error
+	}{
+		{name: "success"},
+		{name: "classification failure", classificationErr: errors.New("classification failed")},
+		{name: "persistence failure", persistenceErr: errors.New("persistence failed")},
+		{name: "notification failure", notificationErr: errors.New("notification failed")},
+		{name: "notification canceled", notificationErr: context.Canceled},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), struct{}{}, "request")
+			classification := lead.Classification{Category: "sales", Priority: "high", Summary: "Inquiry", RecommendedAction: "Call"}
+			classifier := lead.ClassifierFunc(func(context.Context, lead.Lead) (lead.Classification, error) {
+				return classification, tt.classificationErr
+			})
+			persistCalls, notifyCalls := 0, 0
+			var persisted lead.Lead
+			repository := repositoryFunc(func(_ context.Context, value lead.Lead) (lead.Lead, error) {
+				persistCalls++
+				value.ID = 42
+				persisted = value
+				return value, tt.persistenceErr
+			})
+			notifier := notifierFunc(func(gotCtx context.Context, value lead.Lead) error {
+				notifyCalls++
+				if persistCalls != 1 || tt.persistenceErr != nil {
+					t.Fatal("notification before successful persistence")
+				}
+				if gotCtx != ctx || value != persisted {
+					t.Fatalf("notification did not receive context and persisted lead: %#v", value)
+				}
+				return tt.notificationErr
+			})
+			var logs strings.Builder
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
+			created, err := lead.NewService(classifier, repository, notifier, logger).Create(ctx, validParams())
+			if tt.classificationErr != nil || tt.persistenceErr != nil {
+				want := tt.classificationErr
+				if want == nil {
+					want = tt.persistenceErr
+				}
+				if !errors.Is(err, want) || notifyCalls != 0 {
+					t.Fatalf("error = %v, notifications = %d", err, notifyCalls)
+				}
+				return
+			}
+			if err != nil || created != persisted || persistCalls != 1 || notifyCalls != 1 {
+				t.Fatalf("created = %#v, error = %v, persistence = %d, notifications = %d", created, err, persistCalls, notifyCalls)
+			}
+			if tt.notificationErr != nil && (!strings.Contains(logs.String(), "lead notification failed") || !strings.Contains(logs.String(), "lead_id=42")) {
+				t.Fatalf("missing notification failure log: %s", logs.String())
+			}
+		})
+	}
 }

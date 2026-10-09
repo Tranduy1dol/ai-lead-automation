@@ -3,6 +3,7 @@ package lead
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"strings"
 	"unicode/utf8"
@@ -11,10 +12,12 @@ import (
 type Service struct {
 	classifier Classifier
 	repository Repository
+	notifier   Notifier
+	logger     *slog.Logger
 }
 
-func NewService(classifier Classifier, repository Repository) *Service {
-	return &Service{classifier: classifier, repository: repository}
+func NewService(classifier Classifier, repository Repository, notifier Notifier, logger *slog.Logger) *Service {
+	return &Service{classifier: classifier, repository: repository, notifier: notifier, logger: logger}
 }
 
 type ValidationError string
@@ -42,6 +45,12 @@ func (s *Service) Create(ctx context.Context, params CreateParams) (Lead, error)
 	created, err := s.repository.Create(ctx, lead)
 	if err != nil {
 		return Lead{}, fmt.Errorf("persist lead: %w", err)
+	}
+	if s.notifier != nil {
+		if err := s.notifier.Notify(ctx, created); err != nil {
+			// Returning an error after persistence could make callers retry lead creation.
+			s.logger.WarnContext(ctx, "lead notification failed", "lead_id", created.ID, "error", err)
+		}
 	}
 	return created, nil
 }
