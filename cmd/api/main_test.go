@@ -18,6 +18,7 @@ func TestRunRequiresOpenAIConfigurationBeforeDatabaseConnection(t *testing.T) {
 		{"test-key", "", "OPENAI_MODEL"},
 	} {
 		t.Run(tt.want, func(t *testing.T) {
+			t.Setenv("CLASSIFIER_MODE", "openai")
 			t.Setenv("DATABASE_URL", "invalid-database-url")
 			t.Setenv("OPENAI_API_KEY", tt.key)
 			t.Setenv("OPENAI_MODEL", tt.model)
@@ -52,6 +53,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestRunRejectsInvalidDiscordURLBeforeDatabaseConnection(t *testing.T) {
+	t.Setenv("CLASSIFIER_MODE", "openai")
 	t.Setenv("DATABASE_URL", "invalid-database-url")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_MODEL", "test-model")
@@ -59,5 +61,34 @@ func TestRunRejectsInvalidDiscordURLBeforeDatabaseConnection(t *testing.T) {
 	err := run(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || !strings.Contains(err.Error(), "DISCORD_WEBHOOK_URL") {
 		t.Fatalf("error = %v, want invalid Discord configuration", err)
+	}
+}
+
+func TestMockClassifier(t *testing.T) {
+	t.Setenv("CLASSIFIER_MODE", "mock")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_MODEL", "")
+	classifier, err := newClassifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := lead.Classification{Category: "sales", Priority: "normal", Summary: "Demo lead received.", RecommendedAction: "Review the lead and contact the prospect."}
+	for _, value := range []lead.Lead{{}, {Company: "Acme", Message: "Hello"}} {
+		got, err := classifier.Classify(context.Background(), value)
+		if err != nil || got != want {
+			t.Fatalf("classification = %#v, error = %v", got, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := classifier.Classify(ctx, lead.Lead{}); err != context.Canceled {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestUnknownClassifierMode(t *testing.T) {
+	t.Setenv("CLASSIFIER_MODE", "typo")
+	if _, err := newClassifier(); err == nil {
+		t.Fatal("expected configuration error")
 	}
 }

@@ -37,7 +37,7 @@ func run(logger *slog.Logger) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
-	classifier, err := llm.NewOpenAIClassifier(os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_MODEL"), nil)
+	classifier, err := newClassifier()
 	if err != nil {
 		return fmt.Errorf("configure classifier: %w", err)
 	}
@@ -110,4 +110,23 @@ func newMux(leadHandler *lead.Handler) *http.ServeMux {
 	})
 	mux.HandleFunc("POST /leads", leadHandler.Create)
 	return mux
+}
+
+func newClassifier() (lead.Classifier, error) {
+	switch os.Getenv("CLASSIFIER_MODE") {
+	case "", "openai":
+		return llm.NewOpenAIClassifier(os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_MODEL"), nil)
+	case "mock":
+		return lead.ClassifierFunc(func(ctx context.Context, _ lead.Lead) (lead.Classification, error) {
+			if err := ctx.Err(); err != nil {
+				return lead.Classification{}, err
+			}
+			return lead.Classification{
+				Category: "sales", Priority: "normal",
+				Summary: "Demo lead received.", RecommendedAction: "Review the lead and contact the prospect.",
+			}, nil
+		}), nil
+	default:
+		return nil, errors.New("CLASSIFIER_MODE must be openai or mock")
+	}
 }
