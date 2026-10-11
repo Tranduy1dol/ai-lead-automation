@@ -4,16 +4,53 @@ A Go API that accepts leads, validates input, classifies the inquiry, persists t
 result in PostgreSQL, and optionally notifies a sales team through Discord.
 The portfolio demo runs without paid API access using a deterministic mock classifier.
 
+## Problem and business value
+
+Inbound inquiries arrive as free text, leaving sales teams to copy contact details,
+read each message, and decide what to do next. This project demonstrates one intake
+workflow that produces a stored lead with a category, priority, summary, and suggested
+next action, with an optional team notification after saving.
+
+The intended value is consistent intake and less manual triage. No time savings,
+conversion uplift, classification accuracy, or performance benchmarks have been measured.
+Human review remains necessary for model-generated recommendations.
+
+## Feature overview
+
+| Capability | v0.1.0 scope |
+| --- | --- |
+| Lead intake | `POST /leads`, normalized and validated contact fields |
+| Classification | OpenAI adapter or deterministic, free mock mode |
+| Persistence | PostgreSQL insert with generated ID and timestamp; embedded migrations |
+| Notifications | Optional synchronous, best-effort Discord webhook after persistence |
+| Operations | Liveness endpoint, JSON API logs, graceful shutdown, Docker Compose |
+
+See the [release audit and checklist](docs/release-v0.1.0.md) for executed checks,
+unverified integrations, and outstanding issues. This is a local portfolio release,
+not a production deployment configuration.
+
+## Tech stack
+
+Go 1.27.1, standard-library `net/http`, `encoding/json`, and `log/slog`; pgx v5 for
+PostgreSQL; PostgreSQL 17.6 in Docker Compose; OpenAI Responses and Discord webhook
+HTTP adapters. The automated demo uses Python 3's standard library and Docker Compose.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client -->|POST /leads| Handler[Lead handler]
-    Handler --> Service[Lead service]
-    Service --> Classifier[OpenAI or deterministic mock]
-    Service --> Repository[PostgreSQL repository]
-    Repository --> DB[(PostgreSQL)]
-    Service -->|after persistence, optional| Discord[Discord notifier]
+    Client -->|POST /leads| Handler[HTTP API: lead.Handler]
+    Handler --> Service[Lead Service]
+    Service -->|1. classify| Classifier[Classifier interface]
+    Classifier --> OpenAI[llm.OpenAIClassifier]
+    OpenAI --> Responses[OpenAI Responses API]
+    Classifier --> Mock[ClassifierFunc: deterministic mock]
+    Service -->|2. persist| Repository[Repository interface]
+    Repository --> PG[lead.PostgresRepository / pgx]
+    PG --> DB[(PostgreSQL)]
+    Service -->|3. optional best-effort| Notifier[Notifier interface]
+    Notifier --> Discord[notification.DiscordNotifier]
+    Discord --> Webhook[Discord webhook]
     Migrate[Migration command] --> DB
 ```
 
@@ -28,7 +65,24 @@ and persistence. `internal/llm` and `internal/notification` contain external ada
 - `curl` for the API examples.
 - PostgreSQL 17 if using an existing **local development** database instead of Docker.
 
-## Docker Compose demo
+## Quick start
+
+For an automated, self-checking demo, install Docker Compose and Python 3, then run:
+
+```sh
+python3 scripts/demo.py
+```
+
+It builds an isolated Compose project on random localhost ports, forces mock
+classification and disables external notifications, submits a lead, checks every
+persisted field against the response, and checks persistence after restarting the
+database and API. It prints the classification and removes only its own temporary
+containers and database volume on exit. Existing `.env` credentials are not used.
+The first build may download images and Go modules; build images/cache may remain.
+If the process is killed before cleanup, use the project name printed at startup
+for manual cleanup; do not use `-v` against your normal development project.
+
+### Docker Compose demo
 
 ```sh
 cp .env.example .env
@@ -58,7 +112,7 @@ docker compose up -d
 `docker compose down -v` permanently deletes this Compose project's database volume.
 Change `PORT` or `POSTGRES_PORT` if the default host ports are occupied.
 
-## Local setup
+### Local setup
 
 ```sh
 cp .env.example .env
@@ -174,7 +228,6 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SEL
 ## Testing
 
 ```sh
-gofmt -w cmd internal migration
 go test ./...
 go vet ./...
 go build ./...
@@ -211,6 +264,14 @@ See the [Discord webhook API](https://docs.discord.com/developers/resources/webh
   delivery may be uncertain. There is no durable outbox or queue.
 - Repeating `POST /leads` can create duplicates; there is no idempotency key.
 - The mock demonstrates the workflow, not semantic lead qualification.
+- There is no lead listing, retrieval, update, or deletion API, user interface,
+  CRM integration, or asynchronous processing. Use SQL to inspect demo persistence.
+- Only request headers have a server read timeout; body reads have a size limit
+  but no read deadline. Native HTTP binds all interfaces. Keep access local or
+  behind deployment controls with appropriate timeouts.
+- Company and message can contain personal information sent to the classifier;
+  company and generated classification text can also reach Discord. No retention,
+  consent, or automated deletion workflow is implemented.
 - `/health` is a liveness endpoint and does not check the database after startup.
 - No authentication, rate limiting, or TLS termination is provided. This is a local
   portfolio demo; add deployment access controls before public exposure.
