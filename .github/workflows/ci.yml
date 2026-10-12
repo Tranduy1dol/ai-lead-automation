@@ -9,6 +9,7 @@ permissions:
 
 env:
   OPENAI_API_KEY: ""
+  OPENROUTER_API_KEY: ""
   DISCORD_WEBHOOK_URL: ""
   DATABASE_URL: ""
   RUN_POSTGRES_TESTS: "0"

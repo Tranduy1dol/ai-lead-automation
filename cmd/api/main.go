@@ -116,6 +116,8 @@ func newClassifier() (lead.Classifier, error) {
 	switch os.Getenv("CLASSIFIER_MODE") {
 	case "", "openai":
 		return llm.NewOpenAIClassifier(os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_MODEL"), nil)
+	case "openrouter":
+		return llm.NewOpenRouterClassifier(os.Getenv("OPENROUTER_API_KEY"), os.Getenv("OPENROUTER_MODEL"), nil)
 	case "mock":
 		return lead.ClassifierFunc(func(ctx context.Context, _ lead.Lead) (lead.Classification, error) {
 			if err := ctx.Err(); err != nil {
@@ -127,6 +129,6 @@ func newClassifier() (lead.Classifier, error) {
 			}, nil
 		}), nil
 	default:
-		return nil, errors.New("CLASSIFIER_MODE must be openai or mock")
+		return nil, errors.New("CLASSIFIER_MODE must be openai, openrouter, or mock")
 	}
 }

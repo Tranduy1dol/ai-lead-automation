@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Tranduy1dol/ai-lead-automation/internal/lead"
+	"github.com/Tranduy1dol/ai-lead-automation/internal/llm"
 )
 
 func TestRunRequiresOpenAIConfigurationBeforeDatabaseConnection(t *testing.T) {
@@ -90,5 +91,41 @@ func TestUnknownClassifierMode(t *testing.T) {
 	t.Setenv("CLASSIFIER_MODE", "typo")
 	if _, err := newClassifier(); err == nil {
 		t.Fatal("expected configuration error")
+	}
+}
+
+func TestOpenRouterMode(t *testing.T) {
+	t.Setenv("CLASSIFIER_MODE", "openrouter")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Setenv("OPENROUTER_MODEL", "")
+	classifier, err := newClassifier()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := classifier.(*llm.OpenRouterClassifier); !ok {
+		t.Fatalf("classifier = %T", classifier)
+	}
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("DATABASE_URL", "invalid-database-url")
+	if err := run(slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil || !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestOpenAIModeCompatibility(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "test-model")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	for _, mode := range []string{"", "openai"} {
+		t.Setenv("CLASSIFIER_MODE", mode)
+		classifier, err := newClassifier()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := classifier.(*llm.OpenAIClassifier); !ok {
+			t.Fatalf("classifier = %T", classifier)
+		}
 	}
 }

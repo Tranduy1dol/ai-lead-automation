@@ -20,7 +20,7 @@ Human review remains necessary for model-generated recommendations.
 | Capability | v0.1.0 scope |
 | --- | --- |
 | Lead intake | `POST /leads`, normalized and validated contact fields |
-| Classification | OpenAI adapter or deterministic, free mock mode |
+| Classification | OpenAI / OpenRouter adapters or deterministic, free mock mode |
 | Persistence | PostgreSQL insert with generated ID and timestamp; embedded migrations |
 | Notifications | Optional synchronous, best-effort Discord webhook after persistence |
 | Operations | Liveness endpoint, JSON API logs, graceful shutdown, Docker Compose |
@@ -32,7 +32,7 @@ not a production deployment configuration.
 ## Tech stack
 
 Go 1.27.1, standard-library `net/http`, `encoding/json`, and `log/slog`; pgx v5 for
-PostgreSQL; PostgreSQL 17.6 in Docker Compose; OpenAI Responses and Discord webhook
+PostgreSQL; PostgreSQL 17.6 in Docker Compose; OpenAI Responses, OpenRouter Chat Completions, and Discord webhook
 HTTP adapters. The automated demo uses Python 3's standard library and Docker Compose.
 
 ## Architecture
@@ -44,6 +44,8 @@ flowchart LR
     Service -->|1. classify| Classifier[Classifier interface]
     Classifier --> OpenAI[llm.OpenAIClassifier]
     OpenAI --> Responses[OpenAI Responses API]
+    Classifier --> OpenRouter[llm.OpenRouterClassifier]
+    OpenRouter --> Chat[OpenRouter Chat Completions API]
     Classifier --> Mock[ClassifierFunc: deterministic mock]
     Service -->|2. persist| Repository[Repository interface]
     Repository --> PG[lead.PostgresRepository / pgx]
@@ -139,9 +141,11 @@ its own internal URL using the `POSTGRES_*` variables and `db:5432`.
 | `POSTGRES_PASSWORD` | Required Compose database password; example is local-only |
 | `POSTGRES_DB` | Compose database name, `ai_lead_automation` |
 | `POSTGRES_PORT` | Compose published PostgreSQL port, `5432` |
-| `CLASSIFIER_MODE` | `mock` for the demo, or `openai`; native unset retains `openai` behavior |
+| `CLASSIFIER_MODE` | `mock` for the demo, `openai`, or `openrouter`; native unset retains `openai` behavior |
 | `OPENAI_API_KEY` | Required only in OpenAI mode; blank in the example |
 | `OPENAI_MODEL` | Required in OpenAI mode; example: `gpt-4o-mini` |
+| `OPENROUTER_API_KEY` | Required only in OpenRouter mode; blank in the example |
+| `OPENROUTER_MODEL` | OpenRouter model; defaults to `openrouter/free` when empty |
 | `DISCORD_WEBHOOK_URL` | Optional incoming webhook URL; blank disables notifications |
 | `RUN_POSTGRES_TESTS` | `1` opts into isolated Docker integration tests; default `0` |
 
@@ -161,6 +165,60 @@ real credentials. The sample database password is only for local demonstrations.
 Compose interpolates user/password/database into a URL: use URL-safe local values;
 for native deployments, percent-encode reserved characters in `DATABASE_URL`.
 Changing `POSTGRES_*` does not change users/passwords in an already initialized volume.
+
+### OpenRouter configuration and manual smoke test
+
+OpenRouter mode uses `POST https://openrouter.ai/api/v1/chat/completions` with
+Bearer authentication. It shares OpenAI's classification instructions, JSON schema,
+and local validation. The system message treats lead fields as untrusted data;
+the JSON user message contains only company and message, never separate name/email
+fields. Free text may still contain personal information. No tools are offered or
+executed, and tool-call responses are rejected. Prompt instructions do not guarantee
+semantic accuracy or immunity to prompt injection; review generated recommendations.
+
+Requests use strict `response_format: json_schema` and
+`provider.require_parameters: true` to select compatible providers, following
+[OpenRouter structured-output guidance](https://openrouter.ai/docs/guides/features/structured-outputs).
+Provider fallback is disabled with `allow_fallbacks: false`; the adapter does not
+retry or substitute mock classifications. Only a single assistant message ending
+with `finish_reason: stop` is accepted. Refusals, truncation, malformed output,
+unsupported parameters, and provider failures fail creation before persistence.
+Requests have a 30-second deadline and a 1 MiB response limit; redirects are rejected.
+Errors exclude raw provider bodies and transport details that could contain secrets.
+
+The default `openrouter/free` selects from available free models. Availability,
+structured-output support, and rate limits can change; a compatible free provider
+may be unavailable. See the [free router](https://openrouter.ai/openrouter/free).
+An explicitly selected model may have different pricing. OpenRouter requires its
+own key; `OPENAI_API_KEY` is not needed. Live OpenRouter behavior has not been verified;
+unit tests use an injected HTTP transport without provider network requests.
+
+To perform an optional live smoke test yourself:
+
+1. Use the local Compose setup above. In your ignored `.env`, set
+   `CLASSIFIER_MODE=openrouter`, set `OPENROUTER_API_KEY` privately, and set
+   `OPENROUTER_MODEL=openrouter/free`. Leave `OPENAI_API_KEY` and
+   `DISCORD_WEBHOOK_URL` empty. Do not put the key in shell history or shared logs.
+2. Ensure your shell does not override those `.env` settings, then run:
+
+   ```sh
+   docker compose up --build -d
+   curl --fail http://localhost:8080/health
+   curl --fail-with-body -i http://localhost:8080/leads \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"Demo","email":"demo@example.com","company":"Acme","message":"We need invoice automation."}'
+   ```
+
+3. Expect HTTP `201` with valid category/priority and nonempty summary/action;
+   wording varies by model. Use the SQL example below to inspect persistence.
+   HTTP `500` indicates classification or database failure; safe API logs can
+   distinguish authentication (`401`), rate limits (`429`), unsupported parameters,
+   and provider availability errors. Health alone does not exercise the classifier.
+4. Return `CLASSIFIER_MODE` to `mock` and clear the OpenRouter key when finished.
+   Run `docker compose up -d` to apply the change, or `docker compose down` to stop.
+
+The automated `python3 scripts/demo.py` remains mock-only and explicitly clears
+OpenAI, OpenRouter, and Discord credentials, including inherited shell values.
 
 ## Migrations
 
@@ -231,7 +289,7 @@ GitHub Actions [CI](.github/workflows/ci.yml) runs on every push and pull reques
 Both jobs use the Go version in `go.mod`. The Go job runs tests, vet, and build;
 the separate PostgreSQL job runs the existing disposable-container test with
 `RUN_POSTGRES_TESTS=1` and `-count=1` so cached results cannot bypass the database.
-CI needs no OpenAI, Discord, or database secrets. Hosted execution is pending;
+CI needs no OpenAI, OpenRouter, Discord, or database secrets. Hosted execution is pending;
 see the dated [verification record](docs/release-v0.1.0.md#verification-record).
 
 ```sh
@@ -254,7 +312,7 @@ Coverage includes successful inserts, all persisted fields read back via SQL,
 constraint errors without partial inserts, cancellation, a closed database pool,
 migration rollback on failure, concurrent migration runners, and repeat migrations
 preserving data. Existing tests cover service ordering, validation, HTTP error
-responses, and mocked OpenAI/Discord behavior. Integration tests may download the
+responses, and mocked OpenAI/OpenRouter/Discord behavior. Integration tests may download the
 PostgreSQL image on their first run.
 
 ## Discord notifications and known limitations

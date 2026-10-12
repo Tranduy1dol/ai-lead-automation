@@ -24,6 +24,8 @@ ENV = {
     "CLASSIFIER_MODE": "mock",
     "OPENAI_API_KEY": "",
     "OPENAI_MODEL": "",
+    "OPENROUTER_API_KEY": "",
+    "OPENROUTER_MODEL": "",
     "DISCORD_WEBHOOK_URL": "",
 }
 COMPOSE = [
@@ -84,7 +86,7 @@ def verify_stored(created):
 
 def main():
     print(f"Demo project: {PROJECT}", flush=True)
-    print("Mock classification forced; OpenAI and Discord credentials disabled.", flush=True)
+    print("Mock classification forced; OpenAI, OpenRouter, and Discord credentials disabled.", flush=True)
     try:
         compose("up", "--build", "-d")
         base = ready()
