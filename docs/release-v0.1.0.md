@@ -1,9 +1,12 @@
 # v0.1.0 release audit and checklist
 
-Audit date: 2026-10-11. Base revision: `eebc528`; release preparation changes are
-uncommitted. Scope: all 27 tracked files, including application code, tests,
-migrations, dependencies, container configuration, and documentation; all six
-reachable commits were included in the credential-pattern scan.
+Initial audit: 2026-10-11 at base revision `eebc528`. Day 8 hardening:
+2026-10-12 at base revision `d6f1942`, plus the uncommitted CI/documentation changes.
+The initial audit covered application code, tests, migrations, dependencies,
+packaging, and documentation. Day 8 reviewed CI, test isolation, configuration,
+and release claims; the refreshed credential scan covered all seven reachable
+commits and the working files. Counts and results below describe this snapshot,
+not a tagged release.
 
 ## Readiness
 
@@ -28,15 +31,15 @@ No business features or application architecture were changed for this release.
 | Runtime | Startup database ping, JSON logging, signal-driven shutdown | Source inspection; Compose start/stop passed; forced shutdown under load untested |
 | Packaging | Multi-stage image, unprivileged scratch runtime, read-only filesystem, loopback ports, persistent volume | Compose build/start/demo/restart/cleanup passed |
 
-The README previously lacked an explicit problem/value statement, verification
-status, and one-command self-checking demo. These are now supplied along with an
-interface-to-adapter Mermaid diagram. Existing manual setup and migration guidance
-remain in place.
+The initial preparation supplied README problem/value and verification statements,
+a self-checking demo, and an interface-to-adapter Mermaid diagram. Day 8 adds CI
+and updates verification records without changing application code or dependencies.
 
 ## Verification record
 
-Executed on Linux amd64 with `go1.27.1-X:nodwarf5`, Docker Engine 29.8.2, and
-Docker Compose 5.6.0. Commands below omit the local RTK output wrapper.
+The automated checks below were invoked locally on 2026-10-12 on Linux amd64
+with `go1.27.1-X:nodwarf5` and Docker Engine 29.8.2. Commands omit the local RTK
+wrapper. These are local results, not evidence of a GitHub-hosted CI run.
 
 | Command/check | Result |
 | --- | --- |
@@ -48,13 +51,42 @@ Docker Compose 5.6.0. Commands below omit the local RTK output wrapper.
 | `python3 scripts/demo.py` | Passed: build/start/migrate, health, HTTP 201, classification, all stored fields, persistence after restart, cleanup |
 | `git diff --check` | Passed |
 | Ignore rules | `.env`, `.env.local`, `bin/api` ignored; `.env.example` tracked; Python cache ignored |
-| Credential review | No real credentials identified by source review or pattern scan across 6 commits / 50 unique blobs |
+| Credential pattern scan | No matches across 7 commits / 54 unique blobs and 30 working files; source/configuration review identified only test/demo placeholders |
+| Workflow YAML/settings check | Passed local YAML parsing and assertions for triggers, permissions, Go version source, commands, blank credentials, and uncached integration opt-in; `actionlint` unavailable |
+| `govulncheck ./...` | Incomplete: installed scanner uses Go 1.26 source-processing packages and cannot load this Go 1.27 project; no vulnerability verdict |
 
 Docker required elevated socket access in the audit environment. The build used
 cached layers and the classic builder because the buildx plugin was absent; this
 is not a verified cold build or cross-platform build. The demo's unique project
-was `lead-demo-6df7761fbdd7`; its containers, network, and database volume were
+was `lead-demo-8913fbed6099`; its containers, network, and database volume were
 removed successfully. Build images/cache may remain.
+
+Manual review covered test destinations, workflow secret handling, example
+configuration, ignore rules, and stale documentation. README rendering, licensing,
+and final release approval remain manual checklist items. Live OpenAI and Discord
+checks were not performed; the automated adapter checks use mocks/local servers.
+
+## CI design and pending hosted verification
+
+- `.github/workflows/ci.yml` triggers on `push` and `pull_request`, with no branch
+  or path filters. Two independent Ubuntu jobs separate Go checks from Docker
+  integration failures; both have a ten-minute limit.
+- Both use `actions/setup-go` with `go-version-file: go.mod`, avoiding a second
+  Go version setting. This follows the action's
+  [version-file support](https://github.com/actions/setup-go/blob/main/docs/advanced-usage.md).
+- The Go job runs `go test ./...`, `go vet ./...`, and `go build ./...`.
+  The PostgreSQL job runs `TestPostgresRepository` with `RUN_POSTGRES_TESTS=1`
+  and `-count=1`; it reuses the existing container lifecycle rather than adding
+  a service database or a configurable connection URL. Docker failures fail it.
+- Repository permissions are `contents: read`; checkout does not persist its
+  token. No repository/environment secrets are referenced. Application API keys,
+  webhook URL, and database URL are explicitly empty. Steps do not dump environment
+  variables or expanded Compose configuration. Only public disposable test
+  passwords could appear in test failure diagnostics.
+- GitHub-hosted execution, action/toolchain downloads, and hosted logs remain
+  unverified until both jobs pass on the chosen release revision. Action versions
+  use major tags, not immutable commit pins. The Compose demo and credential scan
+  are local release checks and are not included in CI.
 
 ## Configuration and security review
 
@@ -65,7 +97,7 @@ removed successfully. Build images/cache may remain.
   now excluded for the demo. `.dockerignore` allows only build inputs and excludes
   tests; environment files are outside the build context.
 - The credential scan checked common OpenAI key, AWS access key, private key,
-  and Discord webhook patterns without printing secret values. It is a heuristic,
+  GitHub token, and Discord webhook patterns without printing secret values. It is a heuristic,
   not proof of absence: unreachable Git objects, remote refs not present locally,
   and arbitrary secret formats were not scanned.
 - SQL uses parameters. Client responses hide internal errors. OpenAI error bodies
@@ -84,8 +116,15 @@ removed successfully. Build images/cache may remain.
   configuration to untrusted users.
 - Server request headers have a deadline; body reads have a size cap but no read
   deadline. Public deployment requires appropriate connection/body timeouts.
-- No dependency vulnerability scanner, penetration test, or container vulnerability
+- The dependency vulnerability scan was attempted but could not complete because
+  of scanner/toolchain incompatibility. No penetration test or container vulnerability
   scan was run. Image tags are versioned but not digest-pinned.
+- PostgreSQL integration tests construct their URL only from the container they
+  create on a random loopback port with tmpfs storage. They never consume
+  `DATABASE_URL` or production configuration. Startup validation tests use an
+  invalid database URL and fail before connecting; provider tests use HTTP mocks
+  or local servers. The Compose demo overrides provider credentials and creates
+  its own database volume.
 
 ## Outstanding issues and intentional limits
 
@@ -96,7 +135,9 @@ removed successfully. Build images/cache may remain.
 | Before public deployment | No access controls, TLS, rate limits, body deadline, restricted DB role, or retention/deletion policy | Keep v0.1.0 local; address these in a separately scoped deployment review |
 | Reliability limit | Notifications can be lost after persistence; requests wait for notification attempt | Document best-effort delivery; no durable outbox/retry claim |
 | API limit | No idempotency or read/list/update/delete endpoints | Retrying POST can duplicate leads; inspect persistence with SQL |
-| Test gap | Validation boundary cases lack exhaustive regression coverage; no CI workflow | Add focused boundary tests and CI in future maintenance work |
+| Before release | CI workflow added but not executed on GitHub | Require both jobs to pass on the chosen release revision and inspect logs |
+| Security verification gap | Installed vulnerability scanner cannot process Go 1.27 | Run a compatible scanner before claiming dependency vulnerability verification |
+| Test gap | Validation boundary cases lack exhaustive regression coverage | Add focused boundary tests in future maintenance work |
 | Operational limit | Health is liveness only; migration rollback/down and checksums are absent | Apply migrations before startup; inspect logs; back up data before upgrades |
 | Evaluation gap | No semantic accuracy, latency, throughput, cost, or business outcome measurements | Do not publish benchmark or ROI claims |
 
@@ -111,9 +152,13 @@ classification even for support or spam inquiries.
 - [x] Show service interfaces and infrastructure adapters in Mermaid.
 - [x] Provide a self-checking, isolated demo without paid API calls or notifications.
 - [x] Verify SQL persistence and persistence after database/API restart.
-- [x] Run Go tests, vet, build, PostgreSQL integration tests, and Compose smoke test.
+- [x] Run local automated Go tests, vet, build, PostgreSQL integration tests, and Compose smoke test (2026-10-12).
+- [x] Add push/PR CI with Go version from `go.mod` and an isolated PostgreSQL job.
+- [x] Parse workflow YAML and inspect secret handling and test database isolation locally.
 - [x] Review committed credentials, ignore rules, and example environment values.
 - [x] Distinguish local/mock verification from unverified live behavior.
+- [ ] Obtain passing GitHub Actions results for both jobs on the chosen release revision; inspect hosted logs for credential exposure.
+- [ ] Complete a dependency vulnerability scan using a Go 1.27-compatible scanner.
 - [ ] Owner reviews the final diff and accepts the documented release scope.
 - [ ] Owner decides licensing before presenting the repository as reusable open source.
 - [ ] Preview README Mermaid rendering on the hosting platform.

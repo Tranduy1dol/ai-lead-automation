@@ -227,6 +227,13 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SEL
 
 ## Testing
 
+GitHub Actions [CI](.github/workflows/ci.yml) runs on every push and pull request.
+Both jobs use the Go version in `go.mod`. The Go job runs tests, vet, and build;
+the separate PostgreSQL job runs the existing disposable-container test with
+`RUN_POSTGRES_TESTS=1` and `-count=1` so cached results cannot bypass the database.
+CI needs no OpenAI, Discord, or database secrets. Hosted execution is pending;
+see the dated [verification record](docs/release-v0.1.0.md#verification-record).
+
 ```sh
 go test ./...
 go vet ./...
