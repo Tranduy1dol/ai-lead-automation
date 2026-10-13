@@ -4,6 +4,13 @@ A Go API that accepts leads, validates input, classifies the inquiry, persists t
 result in PostgreSQL, and optionally notifies a sales team through Discord.
 The portfolio demo runs without paid API access using a deterministic mock classifier.
 
+## Demo
+
+[![Watch Demo](https://img.youtube.com/vi/fwRQ8wB_IvA/hqdefault.jpg)](https://youtu.be/fwRQ8wB_IvA)
+
+Watch the end-to-end workflow:
+Lead Intake → AI Classification → PostgreSQL → Discord
+
 ## Problem and business value
 
 Inbound inquiries arrive as free text, leaving sales teams to copy contact details,
