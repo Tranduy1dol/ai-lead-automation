@@ -32,9 +32,9 @@ Human review remains necessary for model-generated recommendations.
 | Notifications | Optional synchronous, best-effort Discord webhook after persistence |
 | Operations | Liveness endpoint, JSON API logs, graceful shutdown, Docker Compose |
 
-See the [release audit and checklist](docs/release-v0.1.0.md) for executed checks,
-unverified integrations, and outstanding issues. This is a local portfolio release,
-not a production deployment configuration.
+See the [v0.1.0 release notes](docs/release-v0.1.0.md) for verification results,
+release scope, and future development opportunities. This is a local portfolio MVP;
+production deployment requires additional security and operational work.
 
 ## Tech stack
 
@@ -197,8 +197,13 @@ The default `openrouter/free` selects from available free models. Availability,
 structured-output support, and rate limits can change; a compatible free provider
 may be unavailable. See the [free router](https://openrouter.ai/openrouter/free).
 An explicitly selected model may have different pricing. OpenRouter requires its
-own key; `OPENAI_API_KEY` is not needed. Live OpenRouter behavior has not been verified;
-unit tests use an injected HTTP transport without provider network requests.
+own key; `OPENAI_API_KEY` is not needed. On 2026-10-12, I tested
+a live OpenRouter request through the application and received HTTP `201` with a
+meaningful category, priority, summary, and recommended action. This manual smoke
+test was not independently reproduced during release preparation and is not a CI
+result or an evaluation of classification accuracy, reliability, or production performance.
+Unit tests use an injected HTTP transport without provider network requests.
+The OpenAI adapter has automated tests but remains unverified against the live OpenAI API.
 
 To perform an optional live smoke test yourself:
 
@@ -296,8 +301,11 @@ GitHub Actions [CI](.github/workflows/ci.yml) runs on every push and pull reques
 Both jobs use the Go version in `go.mod`. The Go job runs tests, vet, and build;
 the separate PostgreSQL job runs the existing disposable-container test with
 `RUN_POSTGRES_TESTS=1` and `-count=1` so cached results cannot bypass the database.
-CI needs no OpenAI, OpenRouter, Discord, or database secrets. Hosted execution is pending;
-see the dated [verification record](docs/release-v0.1.0.md#verification-record).
+CI needs no OpenAI, OpenRouter, Discord, or database secrets. GitHub confirms both
+jobs passed on `main` at `93082115bb349f0dcf1df2a31d59c026de78a3a8` on 2026-10-13
+([CI run](https://github.com/Tranduy1dol/ai-lead-automation/actions/runs/38431999334)).
+See the dated [verification record](docs/release-v0.1.0.md#verification-record);
+these results precede the final release documentation changes.
 
 ```sh
 go test ./...
@@ -322,7 +330,7 @@ preserving data. Existing tests cover service ordering, validation, HTTP error
 responses, and mocked OpenAI/OpenRouter/Discord behavior. Integration tests may download the
 PostgreSQL image on their first run.
 
-## Discord notifications and known limitations
+## Discord notifications
 
 Discord is optional and best-effort. Persistence happens first, followed by one
 synchronous notification attempt with a five-second timeout and caller cancellation.
@@ -332,22 +340,40 @@ and long fields are truncated to 900 UTF-8 bytes. Mentions are disabled. The ada
 requests send confirmation, rejects non-2xx responses, and does not retry or follow redirects.
 See the [Discord webhook API](https://docs.discord.com/developers/resources/webhook#execute-webhook).
 
-- A crash, timeout, cancellation, or Discord outage can lose a notification; timeout
-  delivery may be uncertain. There is no durable outbox or queue.
-- Repeating `POST /leads` can create duplicates; there is no idempotency key.
-- The mock demonstrates the workflow, not semantic lead qualification.
-- There is no lead listing, retrieval, update, or deletion API, user interface,
-  CRM integration, or asynchronous processing. Use SQL to inspect demo persistence.
-- Only request headers have a server read timeout; body reads have a size limit
-  but no read deadline. Native HTTP binds all interfaces. Keep access local or
-  behind deployment controls with appropriate timeouts.
-- Company and message can contain personal information sent to the classifier;
-  company and generated classification text can also reach Discord. No retention,
-  consent, or automated deletion workflow is implemented.
-- `/health` is a liveness endpoint and does not check the database after startup.
-- No authentication, rate limiting, or TLS termination is provided. This is a local
-  portfolio demo; add deployment access controls before public exposure.
-- Container tags pin versions but not image digests; builds are not bit-for-bit
-  reproducible. Review base-image updates as part of deployment maintenance.
-- The Compose database user is the image's bootstrap superuser. A real deployment
-  should provision a restricted application role separately from the migration role.
+On 2026-10-12, I received a real Discord notification during a manual smoke test
+containing lead ID, company, category, priority, classification summary, and recommended
+action. This was a manual smoke test, not a CI result or an independently reproduced
+delivery check during release preparation; it does not establish delivery reliability.
+
+## Current scope and future development
+
+v0.1.0 demonstrates the complete lead intake workflow locally. Potential extensions
+can be scoped around a team's sales process; these are development opportunities,
+not features included in this release or a committed delivery schedule.
+
+| Development area | Current scope | Potential extension |
+| --- | --- | --- |
+| Deployment security | Local demo; no authentication, rate limiting, or TLS termination | Access controls and production deployment hardening |
+| Notification delivery | One best-effort attempt after persistence; delivery can be lost | Durable delivery, retries, and delivery tracking |
+| Duplicate prevention | No idempotency key; repeated POST requests can create duplicate leads | Safe request retries with idempotency keys |
+| Lead management | Intake API and SQL inspection; no read/list/update/delete API, UI, or CRM integration | Lead review tools and CRM integration |
+| Classification evaluation | Deterministic mock and a live OpenRouter smoke test; live OpenAI unverified | Live OpenAI verification and quality evaluation on representative inquiries |
+| Data lifecycle | No retention, consent, or automated deletion workflow | Client-specific data handling and retention controls |
+
+See the [release notes](docs/release-v0.1.0.md#current-scope-and-future-development)
+for the verification boundaries and development scope. No classification accuracy,
+reliability, or performance benchmarks are claimed.
+
+### Deployment considerations
+
+- Keep access local until deployment controls are in place. Native HTTP binds all
+  interfaces; only request headers have a read timeout. Request bodies have a size
+  cap but no read deadline.
+- Company and message may contain personal information sent to the classifier;
+  company and generated classification content can also reach Discord. Define data
+  handling requirements before using real customer inquiries.
+- `/health` reports liveness and does not check the database after startup.
+- The Compose database user is a bootstrap superuser. Provision a restricted
+  application role separately from the migration role for a deployed service.
+- Container tags are versioned but not digest-pinned; builds are not bit-for-bit
+  reproducible. Include image updates and security review in deployment planning.
